@@ -314,7 +314,7 @@ export function WorkspaceSetupDialog() {
         setPendingAction("chat");
         setErrorMessage(null);
         if (arenaPreferences.battleMode) {
-          await arenaByokKey.ensure(withConnectedClient());
+          await arenaByokKey.ensure(withConnectedClient(), "openrouter");
           await ensureBattleRepository({ client: withConnectedClient(), cwd });
         }
         const ensuredWorkspace = await ensureWorkspace({ cwd, attachments });

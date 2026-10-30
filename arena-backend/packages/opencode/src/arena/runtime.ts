@@ -175,7 +175,7 @@ export async function contestantFetch(input: string | URL | Request, init?: Requ
     })
   }
   return proxy(new Request(input, init), registry, {
-    upstream: `${target.url}/api/openrouter`,
+    upstream: `${target.url}${target.inferencePath}`,
     fetch: target.fetch,
     telemetry,
     onDispatch: (metadata) => markInitialDispatch(metadata.sessionID),

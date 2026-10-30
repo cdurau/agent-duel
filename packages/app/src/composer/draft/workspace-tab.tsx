@@ -99,7 +99,7 @@ const DRAFT_CAPABILITIES: AgentCapabilityFlags = {
 
 // Before createAgent, so a folder that cannot battle leaves no agent behind.
 async function checkBattleCanStart(input: { client: DaemonClient; cwd: string }): Promise<void> {
-  await arenaByokKey.ensure(input.client);
+  await arenaByokKey.ensure(input.client, "openrouter");
   await ensureBattleRepository({ client: input.client, cwd: input.cwd });
 }
 

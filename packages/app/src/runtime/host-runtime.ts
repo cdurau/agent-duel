@@ -2086,7 +2086,10 @@ export class HostRuntimeStore {
       // queries refetch now and evicted ones on their next mount.
       void invalidateCheckoutGitQueriesForServer(queryClient, serverId);
       invalidateServerDataQueriesAfterReconnect({ queryClient, serverId });
-      if (snapshot.client) deliverArenaByokKeyOnConnect({ serverId, client: snapshot.client });
+      if (snapshot.client) {
+        deliverArenaByokKeyOnConnect({ serverId, client: snapshot.client }, "openrouter");
+        deliverArenaByokKeyOnConnect({ serverId, client: snapshot.client }, "ollama");
+      }
     }
 
     // Runtime owns directory bootstrap policy, including reconnect and delayed

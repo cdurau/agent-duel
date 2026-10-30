@@ -40,9 +40,12 @@ contextBridge.exposeInMainWorld("paseoDesktop", {
   },
   byok: {
     key: {
-      load: () => ipcRenderer.invoke("paseo:byok:key:load") as Promise<string | null>,
-      save: (value: string) => ipcRenderer.invoke("paseo:byok:key:save", value),
-      clear: () => ipcRenderer.invoke("paseo:byok:key:clear"),
+      load: (provider: "openrouter" | "ollama") =>
+        ipcRenderer.invoke(`paseo:byok:key:${provider}:load`) as Promise<string | null>,
+      save: (provider: "openrouter" | "ollama", value: string) =>
+        ipcRenderer.invoke(`paseo:byok:key:${provider}:save`, value),
+      clear: (provider: "openrouter" | "ollama") =>
+        ipcRenderer.invoke(`paseo:byok:key:${provider}:clear`),
     },
   },
   events: {

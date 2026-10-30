@@ -1,5 +1,6 @@
 const privateEnvironmentKeys = [
   "OPENROUTER_API_KEY",
+  "OLLAMA_API_KEY",
   "PASEO_ARENA_SESSION_TOKEN",
   "PASEO_OPENCODE_CONTROL_TOKEN",
 ] as const
@@ -14,10 +15,15 @@ export interface HostedArenaCredentials {
   readonly controlTokenHash: string
 }
 
-/** A source build without a control plane: battles run in process on the user's own OpenRouter key. */
+/** A source build without a control plane: battles run in process on the user's own provider key. */
+export type ByokProvider = "openrouter" | "ollama"
+
 export interface ByokArenaCredentials {
   readonly mode: "byok"
+  /** Which BYOK provider pays for inference; exactly one per build run. */
+  readonly provider: ByokProvider
   readonly openRouterApiKey: string
+  readonly ollamaApiKey: string
   readonly controlTokenHash: string
 }
 
@@ -103,16 +109,32 @@ function parseHosted(value: Record<string, unknown>): HostedArenaCredentials {
 }
 
 function parseByok(value: Record<string, unknown>): ByokArenaCredentials {
-  if (!hasExactly(value, ["mode", "openRouterApiKey", "controlTokenHash"])) throw new ArenaCredentialsError()
-  const { openRouterApiKey, controlTokenHash } = value
+  if (!hasExactly(value, ["mode", "provider", "openRouterApiKey", "ollamaApiKey", "controlTokenHash"]))
+    throw new ArenaCredentialsError()
+  const { provider, openRouterApiKey, ollamaApiKey, controlTokenHash } = value
   if (
-    typeof openRouterApiKey !== "string" ||
-    !openRouterApiKeyPattern.test(openRouterApiKey.trim()) ||
-    typeof controlTokenHash !== "string" ||
-    !controlTokenHashPattern.test(controlTokenHash)
+    provider !== "openrouter" &&
+    provider !== "ollama"
   )
     throw new ArenaCredentialsError()
-  return { mode: "byok", openRouterApiKey: openRouterApiKey.trim(), controlTokenHash }
+  // Exactly the selected provider's key is set; the other stays empty.
+  const active = provider === "openrouter" ? openRouterApiKey : ollamaApiKey
+  const inactive = provider === "openrouter" ? ollamaApiKey : openRouterApiKey
+  for (const key of [openRouterApiKey, ollamaApiKey]) {
+    if (typeof key !== "string" || (key !== "" && !openRouterApiKeyPattern.test(key.trim())))
+      throw new ArenaCredentialsError()
+  }
+  if (typeof active !== "string" || !active.trim() || typeof inactive !== "string" || inactive !== "")
+    throw new ArenaCredentialsError()
+  if (typeof controlTokenHash !== "string" || !controlTokenHashPattern.test(controlTokenHash))
+    throw new ArenaCredentialsError()
+  return {
+    mode: "byok",
+    provider,
+    openRouterApiKey: typeof openRouterApiKey === "string" ? openRouterApiKey.trim() : "",
+    ollamaApiKey: typeof ollamaApiKey === "string" ? ollamaApiKey.trim() : "",
+    controlTokenHash,
+  }
 }
 
 function parse(value: unknown): ArenaCredentials {

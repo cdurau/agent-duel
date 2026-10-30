@@ -2092,11 +2092,17 @@ export class Session {
       case "arena.byok.status.get.request": {
         const available = this.arenaByok !== null;
         const configured = this.arenaByok?.isConfigured() ?? false;
+        const provider = this.arenaByok?.provider() ?? undefined;
         if (msg.keyHandover === "pending") this.arenaByok?.expectKey(this);
         if (msg.keyHandover === "none") this.arenaByok?.expectNoKey(this);
         this.emit({
           type: "arena.byok.status.get.response",
-          payload: { requestId: msg.requestId, available, configured },
+          payload: {
+            requestId: msg.requestId,
+            available,
+            configured,
+            ...(provider ? { provider } : {}),
+          },
         });
         return Promise.resolve();
       }
@@ -3892,7 +3898,7 @@ export class Session {
         payload: {
           requestId: msg.requestId,
           requestType: msg.type,
-          error: "This build signs in to Agent Duel and does not take an OpenRouter key",
+          error: "This build signs in to Agent Duel and does not take a BYOK key",
           code: "arena_byok_unavailable",
         },
       });
@@ -3905,13 +3911,16 @@ export class Session {
         payload: {
           requestId: msg.requestId,
           requestType: msg.type,
-          error: "Enter an OpenRouter API key",
+          error:
+            msg.provider === "ollama"
+              ? "Enter an Ollama Cloud API key"
+              : "Enter an OpenRouter API key",
           code: "arena_byok_invalid_key",
         },
       });
       return;
     }
-    await byok.setKey(key);
+    await byok.setKey(key, msg.provider);
     this.emit({
       type: "arena.byok.key.set.response",
       payload: { requestId: msg.requestId, configured: byok.isConfigured() },

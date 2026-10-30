@@ -23,33 +23,44 @@ vi.mock("@react-native-async-storage/async-storage", () => ({
 }));
 
 function createMemoryStorage(initial: string | null = null) {
-  let value = initial;
+  const values = new Map<string, string | null>([
+    ["openrouter", initial],
+    ["ollama", null],
+  ]);
   const storage: ArenaByokKeyStorage = {
-    load: async () => value,
-    save: async (next) => {
-      value = next;
+    load: async (provider) => values.get(provider) ?? null,
+    save: async (provider, next) => {
+      values.set(provider, next);
     },
-    clear: async () => {
-      value = null;
+    clear: async (provider) => {
+      values.set(provider, null);
     },
   };
-  return { storage, stored: () => value };
+  return { storage, stored: () => values.get("openrouter") ?? null };
 }
 
 /** Answers like the daemon: only a build without a control plane takes a key. */
-function createDaemon(input: { byok: boolean; key?: string | null }) {
+function createDaemon(input: {
+  byok: boolean;
+  key?: string | null;
+  provider?: "openrouter" | "ollama";
+}) {
   let key = input.key ?? null;
+  let providerHeld: "openrouter" | "ollama" = input.provider ?? "openrouter";
   const sent: Array<string | null> = [];
   const handovers: string[] = [];
   const client: ArenaByokClient = {
     arenaByokStatus: async (options = {}): Promise<ArenaByokStatus> => {
       if (options.keyHandover) handovers.push(options.keyHandover);
-      return { available: input.byok, configured: key !== null };
+      const status: ArenaByokStatus = { available: input.byok, configured: key !== null };
+      if (key !== null && providerHeld) status.provider = providerHeld;
+      return status;
     },
-    setArenaByokKey: async (next) => {
+    setArenaByokKey: async (next, provider = "openrouter") => {
       if (!input.byok) throw new Error("This build signs in to Agent Duel");
       sent.push(next);
       key = next;
+      providerHeld = provider;
       return { configured: key !== null };
     },
   };
@@ -69,9 +80,10 @@ describe("delivering the OpenRouter key on connect", () => {
     const keys = createArenaByokKey(createMemoryStorage("sk-or-stored").storage);
     const daemon = createDaemon({ byok: true });
 
-    await expect(keys.deliver(daemon.client)).resolves.toEqual({
+    await expect(keys.deliver(daemon.client, "openrouter")).resolves.toEqual({
       available: true,
       configured: true,
+      provider: "openrouter",
     });
     expect(daemon.held()).toBe("sk-or-stored");
     // Announced first, so the daemon holds Arena starts for the key instead of failing them.
@@ -82,7 +94,7 @@ describe("delivering the OpenRouter key on connect", () => {
     const keys = createArenaByokKey(createMemoryStorage().storage);
     const daemon = createDaemon({ byok: true });
 
-    await expect(keys.deliver(daemon.client)).resolves.toEqual({
+    await expect(keys.deliver(daemon.client, "openrouter")).resolves.toEqual({
       available: true,
       configured: false,
     });
@@ -93,7 +105,7 @@ describe("delivering the OpenRouter key on connect", () => {
   it("tells the daemon there is no key coming when the stored key cannot be read", async () => {
     const storage: ArenaByokKeyStorage = {
       load: async () => {
-        throw new Error("Encrypted OpenRouter key storage is unavailable");
+        throw new Error("Encrypted BYOK key storage is unavailable");
       },
       save: async () => undefined,
       clear: async () => undefined,
@@ -101,7 +113,9 @@ describe("delivering the OpenRouter key on connect", () => {
     const keys = createArenaByokKey(storage);
     const daemon = createDaemon({ byok: true });
 
-    await expect(keys.deliver(daemon.client)).rejects.toThrow("storage is unavailable");
+    await expect(keys.deliver(daemon.client, "openrouter")).rejects.toThrow(
+      "storage is unavailable",
+    );
     expect(daemon.handovers).toEqual(["pending", "none"]);
   });
 
@@ -109,7 +123,7 @@ describe("delivering the OpenRouter key on connect", () => {
     const keys = createArenaByokKey(createMemoryStorage("sk-or-stored").storage);
     const daemon = createDaemon({ byok: false });
 
-    await expect(keys.deliver(daemon.client)).resolves.toEqual({
+    await expect(keys.deliver(daemon.client, "openrouter")).resolves.toEqual({
       available: false,
       configured: false,
     });
@@ -120,9 +134,10 @@ describe("delivering the OpenRouter key on connect", () => {
     const keys = createArenaByokKey(createMemoryStorage().storage);
     const daemon = createDaemon({ byok: true, key: "sk-or-other-client" });
 
-    await expect(keys.deliver(daemon.client)).resolves.toEqual({
+    await expect(keys.deliver(daemon.client, "openrouter")).resolves.toEqual({
       available: true,
       configured: true,
+      provider: "openrouter",
     });
     expect(daemon.sent).toEqual([]);
   });
@@ -137,8 +152,8 @@ describe("delivering the OpenRouter key on connect", () => {
     const keys = createArenaByokKey(storage);
     const daemon = createDaemon({ byok: true });
 
-    const delivery = keys.deliver(daemon.client);
-    await keys.set("sk-or-new", []);
+    const delivery = keys.deliver(daemon.client, "openrouter");
+    await keys.set("sk-or-new", "openrouter", []);
     load.resolve("sk-or-old");
     await delivery;
 
@@ -151,7 +166,7 @@ describe("checking for a key before a battle starts", () => {
     const keys = createArenaByokKey(createMemoryStorage().storage);
     const daemon = createDaemon({ byok: true });
 
-    const start = keys.ensure(daemon.client);
+    const start = keys.ensure(daemon.client, "openrouter");
 
     await expect(start).rejects.toBeInstanceOf(ArenaByokKeyMissingError);
     await expect(start).rejects.toThrow("Add your OpenRouter key in Settings to start a battle.");
@@ -161,7 +176,7 @@ describe("checking for a key before a battle starts", () => {
     const keys = createArenaByokKey(createMemoryStorage("sk-or-stored").storage);
     const daemon = createDaemon({ byok: true });
 
-    await keys.ensure(daemon.client);
+    await keys.ensure(daemon.client, "openrouter");
 
     expect(daemon.sent).toEqual(["sk-or-stored"]);
   });
@@ -170,7 +185,7 @@ describe("checking for a key before a battle starts", () => {
     const keys = createArenaByokKey(createMemoryStorage("sk-or-stored").storage);
     const daemon = createDaemon({ byok: true, key: "sk-or-other-client" });
 
-    await keys.ensure(daemon.client);
+    await keys.ensure(daemon.client, "openrouter");
 
     expect(daemon.sent).toEqual([]);
     expect(daemon.held()).toBe("sk-or-other-client");
@@ -180,7 +195,7 @@ describe("checking for a key before a battle starts", () => {
     const keys = createArenaByokKey(createMemoryStorage().storage);
     const daemon = createDaemon({ byok: false });
 
-    await expect(keys.ensure(daemon.client)).resolves.toBeUndefined();
+    await expect(keys.ensure(daemon.client, "openrouter")).resolves.toBeUndefined();
     expect(daemon.sent).toEqual([]);
   });
 });
@@ -192,7 +207,7 @@ describe("saving and removing the key", () => {
     const local = createDaemon({ byok: true });
     const hosted = createDaemon({ byok: false });
 
-    const statuses = await keys.set("sk-or-new", [
+    const statuses = await keys.set("sk-or-new", "openrouter", [
       { serverId: "local", client: local.client },
       { serverId: "hosted", client: hosted.client },
     ]);
@@ -201,7 +216,7 @@ describe("saving and removing the key", () => {
     expect(local.sent).toEqual(["sk-or-new"]);
     expect(hosted.sent).toEqual([]);
     expect(statuses).toEqual([
-      { serverId: "local", status: { available: true, configured: true } },
+      { serverId: "local", status: { available: true, configured: true, provider: "openrouter" } },
       { serverId: "hosted", status: { available: false, configured: false } },
     ]);
   });
@@ -211,15 +226,17 @@ describe("saving and removing the key", () => {
     const keys = createArenaByokKey(memory.storage);
     const local = createDaemon({ byok: true, key: "sk-or-stored" });
 
-    const statuses = await keys.set(null, [{ serverId: "local", client: local.client }]);
+    const statuses = await keys.set(null, "openrouter", [
+      { serverId: "local", client: local.client },
+    ]);
 
     expect(memory.stored()).toBeNull();
     expect(local.sent).toEqual([null]);
     expect(statuses).toEqual([
-      { serverId: "local", status: { available: true, configured: false } },
+      { serverId: "local", status: { available: true, configured: false, provider: "openrouter" } },
     ]);
     const reconnected = createDaemon({ byok: true });
-    await keys.deliver(reconnected.client);
+    await keys.deliver(reconnected.client, "openrouter");
     expect(reconnected.sent).toEqual([]);
   });
 
@@ -227,7 +244,7 @@ describe("saving and removing the key", () => {
     const storage: ArenaByokKeyStorage = {
       load: async () => "sk-or-stored",
       save: async () => {
-        throw new Error("Secure OpenRouter key storage is unavailable");
+        throw new Error("Secure BYOK key storage is unavailable");
       },
       clear: async () => undefined,
     };
@@ -235,11 +252,11 @@ describe("saving and removing the key", () => {
     const local = createDaemon({ byok: true });
 
     await expect(
-      keys.set("sk-or-new", [{ serverId: "local", client: local.client }]),
-    ).rejects.toThrow("Secure OpenRouter key storage is unavailable");
+      keys.set("sk-or-new", "openrouter", [{ serverId: "local", client: local.client }]),
+    ).rejects.toThrow("Secure BYOK key storage is unavailable");
     expect(local.sent).toEqual([]);
 
-    await keys.deliver(local.client);
+    await keys.deliver(local.client, "openrouter");
     expect(local.sent).toEqual(["sk-or-stored"]);
   });
 });
@@ -254,29 +271,29 @@ describe("where the key is stored", () => {
     const encrypted = createMemoryStorage();
     vi.stubGlobal("window", { paseoDesktop: { byok: { key: encrypted.storage } } });
 
-    await platformArenaByokKeyStorage.save("sk-or-desktop");
+    await platformArenaByokKeyStorage.save("openrouter", "sk-or-desktop");
 
     expect(encrypted.stored()).toBe("sk-or-desktop");
     expect(asyncStorage.size).toBe(0);
-    await expect(platformArenaByokKeyStorage.load()).resolves.toBe("sk-or-desktop");
-    await platformArenaByokKeyStorage.clear();
+    await expect(platformArenaByokKeyStorage.load("openrouter")).resolves.toBe("sk-or-desktop");
+    await platformArenaByokKeyStorage.clear("openrouter");
     expect(encrypted.stored()).toBeNull();
   });
 
   it("refuses to fall back to renderer storage in Electron without the bridge", async () => {
     vi.stubGlobal("window", { paseoDesktop: {} });
 
-    await expect(platformArenaByokKeyStorage.save("sk-or-desktop")).rejects.toThrow(
-      "Encrypted OpenRouter key storage is unavailable",
+    await expect(platformArenaByokKeyStorage.save("openrouter", "sk-or-desktop")).rejects.toThrow(
+      "Encrypted BYOK key storage is unavailable",
     );
     expect(asyncStorage.size).toBe(0);
   });
 
   it("uses AsyncStorage in the browser QA harness", async () => {
-    await platformArenaByokKeyStorage.save("sk-or-browser");
+    await platformArenaByokKeyStorage.save("openrouter", "sk-or-browser");
 
-    await expect(platformArenaByokKeyStorage.load()).resolves.toBe("sk-or-browser");
-    await platformArenaByokKeyStorage.clear();
-    await expect(platformArenaByokKeyStorage.load()).resolves.toBeNull();
+    await expect(platformArenaByokKeyStorage.load("openrouter")).resolves.toBe("sk-or-browser");
+    await platformArenaByokKeyStorage.clear("openrouter");
+    await expect(platformArenaByokKeyStorage.load("openrouter")).resolves.toBeNull();
   });
 });

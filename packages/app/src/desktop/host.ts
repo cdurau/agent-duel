@@ -54,12 +54,12 @@ export interface DesktopAccountsBridge {
   };
 }
 
-/** The OpenRouter key of a build without a control plane, encrypted with `safeStorage`. */
+/** A BYOK provider key of a build without a control plane, encrypted with `safeStorage`. */
 export interface DesktopByokBridge {
   key?: {
-    load(): Promise<string | null>;
-    save(value: string): Promise<void>;
-    clear(): Promise<void>;
+    load(provider: "openrouter" | "ollama"): Promise<string | null>;
+    save(provider: "openrouter" | "ollama", value: string): Promise<void>;
+    clear(provider: "openrouter" | "ollama"): Promise<void>;
   };
 }
 

@@ -207,7 +207,7 @@ export async function handleMetadataRequest(request: Request, context: ArenaCont
   if (request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 })
   const caller = await authorize(request, context, (message, status) => Response.json({ error: message }, { status }))
   if (caller instanceof Response) return caller
-  const apiKey = context.openRouterApiKey
+  const apiKey = context.provider === "ollama" ? context.ollamaApiKey : context.openRouterApiKey
   if (!apiKey) return Response.json({ error: "Arena metadata is unavailable" }, { status: 503 })
 
   const text = await request.text().catch(() => undefined)
@@ -249,7 +249,6 @@ export async function handleMetadataRequest(request: Request, context: ArenaCont
   try {
     const response = await requestUtilityModel(context, {
       headers: {
-        Authorization: `Bearer ${apiKey}`,
         Accept: "application/json",
         "Content-Type": "application/json",
       },

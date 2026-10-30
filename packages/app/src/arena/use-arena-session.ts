@@ -173,7 +173,7 @@ export function useArenaStartMutation(serverId: string, agentId: string) {
       attachments?: readonly ComposerAttachment[];
     }) => {
       if (!client) throw new Error("Arena daemon connection is unavailable");
-      await arenaByokKey.ensure(client);
+      await arenaByokKey.ensure(client, "openrouter");
       // A chat that began as a single agent can sit in a folder with no commit yet.
       if (cwd) await ensureBattleRepository({ client, cwd });
       return resolveAndStartArenaTurn({

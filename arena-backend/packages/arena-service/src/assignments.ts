@@ -4,6 +4,7 @@ import { isDuplicateKeyError, type ArenaCollection, type ArenaDb } from "./colle
 import { authorize, type ArenaContext } from "./context"
 import type { StoredGenerationMetrics } from "./metrics"
 import { mediumModel } from "./default-pool"
+import { ollamaMediumModel } from "./ollama-pool"
 import { sampleOne, samplePair, type ModelProfile } from "./pool"
 
 export type SingleAgentModelSize = "medium" | "frontier"
@@ -88,10 +89,11 @@ async function createSet(db: ArenaDb, context: ArenaContext, userId: string, inp
   const existing = await assignments.findOne({ _id: id, userId, kind, scopeID })
   if (existing) return Response.json({ assignments: publicAssignments(existing) })
 
+  const medium = context.provider === "ollama" ? ollamaMediumModel : mediumModel
   const profiles =
     kind === "battle"
       ? samplePair(context.pool, context.random)
-      : [modelSize === "medium" ? mediumModel : sampleOne(context.pool, context.random)]
+      : [modelSize === "medium" ? medium : sampleOne(context.pool, context.random)]
   const privateAssignments: readonly PrivateAssignment[] = profiles.map((model) => {
     const value = { assignmentID: context.uuid(), model }
     return kind === "single" ? { ...value, modelSize } : value
@@ -225,7 +227,7 @@ export async function handleAssignmentsRequest(request: Request, context: ArenaC
     const db = await context.db()
     const input = record(await request.json())
     if (input.action === "create") {
-      const apiKey = context.openRouterApiKey
+      const apiKey = context.provider === "ollama" ? context.ollamaApiKey : context.openRouterApiKey
       if (!apiKey) return Response.json({ error: "Arena contestants are unavailable" }, { status: 503 })
       await context.validateModels(apiKey)
       return await createSet(db, context, caller.id, input)

@@ -13,8 +13,46 @@ interface EncryptedValue {
 
 const ENCRYPTED_VALUES: readonly EncryptedValue[] = [
   { channel: "paseo:accounts:session", fileName: "account-session.safe", label: "account session" },
-  { channel: "paseo:byok:key", fileName: "byok-key.safe", label: "OpenRouter key" },
+  {
+    channel: "paseo:byok:key:openrouter",
+    fileName: "byok-key-openrouter.safe",
+    label: "OpenRouter key",
+  },
+  { channel: "paseo:byok:key:ollama", fileName: "byok-key-ollama.safe", label: "Ollama Cloud key" },
 ];
+
+// Keys stored under the pre-provider single channel, migrated once into the provider-specific
+// files so the old key keeps working and is removed only after the new file was written.
+const LEGACY_BYOK_KEY: EncryptedValue = {
+  channel: "paseo:byok:key",
+  fileName: "byok-key.safe",
+  label: "OpenRouter key",
+};
+
+/** Moves a legacy single-key file to the OpenRouter channel if no provider key exists yet. */
+export async function migrateLegacyByokKey(): Promise<void> {
+  const legacyPath = filePath(LEGACY_BYOK_KEY);
+  const targetPath = filePath(ENCRYPTED_VALUES[1]);
+  try {
+    await readFile(targetPath);
+    // A provider key already exists; the legacy file is stale and can go.
+    await rm(legacyPath, { force: true });
+    return;
+  } catch {
+    // No OpenRouter key yet: fall through and migrate the legacy one.
+  }
+  try {
+    const legacy = await read(LEGACY_BYOK_KEY);
+    if (legacy === null) return;
+    await write(ENCRYPTED_VALUES[1], legacy);
+    await rm(legacyPath, { force: true });
+  } catch (error) {
+    log.warn(
+      "[encrypted-storage] legacy BYOK key migration failed; the old key stays usable",
+      error,
+    );
+  }
+}
 
 function requireApplicationWindow(sender: Electron.WebContents): void {
   const window = BrowserWindow.fromWebContents(sender);

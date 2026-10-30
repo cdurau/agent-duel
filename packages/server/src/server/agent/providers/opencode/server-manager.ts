@@ -51,7 +51,9 @@ function arenaStdinPayload(credentials: ArenaCredentials, controlTokenHash: stri
     case "byok":
       return JSON.stringify({
         mode: "byok",
+        provider: credentials.provider,
         openRouterApiKey: credentials.openRouterApiKey,
+        ollamaApiKey: credentials.ollamaApiKey,
         controlTokenHash,
       });
   }

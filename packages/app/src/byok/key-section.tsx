@@ -3,7 +3,7 @@ import { Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
 import { StyleSheet } from "react-native-unistyles";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { ArenaByokStatus } from "@getpaseo/protocol/arena/rpc-schemas";
+import type { ArenaByokProvider, ArenaByokStatus } from "@getpaseo/protocol/arena/rpc-schemas";
 import { Button } from "@/components/ui/button";
 import { FormTextInput } from "@/components/ui/form-field";
 import { useFetchQuery } from "@/data/query";
@@ -18,11 +18,15 @@ import { settingsStyles } from "@/styles/settings";
 import { confirmDialog } from "@/utils/confirm-dialog";
 import { arenaByokKey, arenaByokStatusQueryKey, type ArenaByokHost } from "./key";
 
-const KEY_PLACEHOLDER = "sk-or-v1-...";
+const PROVIDERS: readonly ArenaByokProvider[] = ["openrouter", "ollama"];
 
 const styles = StyleSheet.create({
   inputRow: {
     alignItems: "flex-start",
+  },
+  providerRow: {
+    flexDirection: "row",
+    gap: 8,
   },
 });
 
@@ -59,17 +63,46 @@ interface KeyInput {
   resetKey: number;
 }
 
+function ProviderButton({
+  option,
+  active,
+  disabled,
+  onSelect,
+}: {
+  option: ArenaByokProvider;
+  active: boolean;
+  disabled: boolean;
+  onSelect: (provider: ArenaByokProvider) => void;
+}) {
+  const { t } = useTranslation();
+  const handlePress = useCallback(() => onSelect(option), [onSelect, option]);
+  return (
+    <Button
+      size="sm"
+      variant={active ? "default" : "outline"}
+      onPress={handlePress}
+      disabled={disabled}
+      testID={`settings-byok-provider-${option}`}
+    >
+      {option === "ollama"
+        ? t("settings.general.byok.ollama")
+        : t("settings.general.byok.openrouter")}
+    </Button>
+  );
+}
+
 /**
  * Rendered only for a daemon without a control plane. The stored key is never read back into
- * the screen; the state shown is whether the daemon holds one.
+ * the screen; the state shown is whether the daemon holds one for the selected provider.
  */
 export function ArenaByokKeySection({ serverId }: { serverId: string | null }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const status = useArenaByokStatus(serverId);
+  const [provider, setProvider] = useState<ArenaByokProvider>("openrouter");
   const [input, setInput] = useState<KeyInput>({ draft: "", resetKey: 0 });
   const { mutate, isPending, isError, variables } = useMutation({
-    mutationFn: (key: string | null) => arenaByokKey.set(key, connectedHosts()),
+    mutationFn: (key: string | null) => arenaByokKey.set(key, provider, connectedHosts()),
     onSuccess: (statuses) => {
       for (const host of statuses) {
         queryClient.setQueryData(arenaByokStatusQueryKey(host.serverId), host.status);
@@ -77,12 +110,16 @@ export function ArenaByokKeySection({ serverId }: { serverId: string | null }) {
       setInput((current) => ({ draft: "", resetKey: current.resetKey + 1 }));
     },
     onError: (error) => {
-      console.warn("[ArenaByok] could not change the OpenRouter key", { error: error.message });
+      console.warn(`[ArenaByok] could not change the ${provider} key`, { error: error.message });
       return queryClient.invalidateQueries({ queryKey: arenaByokStatusQueryKey(serverId) });
     },
   });
 
-  const configured = status?.configured === true;
+  // The daemon reports which provider it holds a key for; a stored key of the other provider is
+  // not delivered until its provider is selected.
+  const activeProvider: ArenaByokProvider =
+    status?.configured && status.provider ? status.provider : provider;
+  const configured = activeProvider === provider && status?.configured === true;
   const key = input.draft.trim();
 
   const handleChangeText = useCallback((draft: string) => {
@@ -94,9 +131,9 @@ export function ArenaByokKeySection({ serverId }: { serverId: string | null }) {
     // A new key restarts Arena, which stops every running battle.
     if (configured) {
       const confirmed = await confirmDialog({
-        title: t("settings.general.openRouterKey.replaceTitle"),
-        message: t("settings.general.openRouterKey.replaceMessage"),
-        confirmLabel: t("settings.general.openRouterKey.replace"),
+        title: t("settings.general.byok.replaceTitle"),
+        message: t("settings.general.byok.replaceMessage"),
+        confirmLabel: t("settings.general.byok.replace"),
         cancelLabel: t("common.actions.cancel"),
         destructive: true,
       });
@@ -107,9 +144,9 @@ export function ArenaByokKeySection({ serverId }: { serverId: string | null }) {
 
   const handleRemove = useCallback(async () => {
     const confirmed = await confirmDialog({
-      title: t("settings.general.openRouterKey.removeTitle"),
-      message: t("settings.general.openRouterKey.removeMessage"),
-      confirmLabel: t("settings.general.openRouterKey.remove"),
+      title: t("settings.general.byok.removeTitle"),
+      message: t("settings.general.byok.removeMessage"),
+      confirmLabel: t("settings.general.byok.remove"),
       cancelLabel: t("common.actions.cancel"),
       destructive: true,
     });
@@ -127,32 +164,33 @@ export function ArenaByokKeySection({ serverId }: { serverId: string | null }) {
   if (isError) {
     error =
       variables === null
-        ? t("settings.general.openRouterKey.removeFailed")
-        : t("settings.general.openRouterKey.saveFailed");
+        ? t("settings.general.byok.removeFailed")
+        : t("settings.general.byok.saveFailed");
   }
   const stateLabel = configured
-    ? t("settings.general.openRouterKey.configured")
-    : t("settings.general.openRouterKey.notConfigured");
+    ? t("settings.general.byok.configured")
+    : t("settings.general.byok.notConfigured");
   const removeLabel = isRemoving
-    ? t("settings.general.openRouterKey.removing")
-    : t("settings.general.openRouterKey.remove");
-  const saveLabel = isSaving
-    ? t("settings.general.openRouterKey.saving")
-    : t("settings.general.openRouterKey.save");
+    ? t("settings.general.byok.removing")
+    : t("settings.general.byok.remove");
+  const saveLabel = isSaving ? t("settings.general.byok.saving") : t("settings.general.byok.save");
+  const placeholder =
+    provider === "ollama"
+      ? t("settings.general.byok.ollamaPlaceholder")
+      : t("settings.general.byok.openRouterPlaceholder");
 
   return (
-    <SettingsSection
-      title={t("settings.general.openRouterKey.title")}
-      testID="settings-openrouter-key"
-    >
+    <SettingsSection title={t("settings.general.byok.title")} testID="settings-byok-key">
       <View style={settingsStyles.card}>
         <View style={settingsStyles.row}>
           <View style={settingsStyles.rowContent}>
-            <Text style={settingsStyles.rowTitle} testID="settings-openrouter-key-state">
+            <Text style={settingsStyles.rowTitle} testID="settings-byok-key-state">
               {stateLabel}
             </Text>
             <Text style={settingsStyles.rowHint}>
-              {t("settings.general.openRouterKey.description")}
+              {provider === "ollama"
+                ? t("settings.general.byok.ollamaDescription")
+                : t("settings.general.byok.openRouterDescription")}
             </Text>
           </View>
           {configured ? (
@@ -162,11 +200,22 @@ export function ArenaByokKeySection({ serverId }: { serverId: string | null }) {
               loading={isRemoving}
               disabled={isPending}
               onPress={handleRemove}
-              testID="settings-openrouter-key-remove"
+              testID="settings-byok-key-remove"
             >
               {removeLabel}
             </Button>
           ) : null}
+        </View>
+        <View style={[settingsStyles.row, settingsStyles.rowBorder, styles.providerRow]}>
+          {PROVIDERS.map((option) => (
+            <ProviderButton
+              key={option}
+              option={option}
+              active={option === provider}
+              disabled={isPending}
+              onSelect={setProvider}
+            />
+          ))}
         </View>
         <View style={[settingsStyles.row, settingsStyles.rowBorder, styles.inputRow]}>
           <View style={settingsStyles.rowContent}>
@@ -175,18 +224,18 @@ export function ArenaByokKeySection({ serverId }: { serverId: string | null }) {
               resetKey={input.resetKey}
               onChangeText={handleChangeText}
               onSubmitEditing={handleSave}
-              placeholder={KEY_PLACEHOLDER}
+              placeholder={placeholder}
               secureTextEntry
               autoCapitalize="none"
               autoCorrect={false}
               autoComplete="off"
               spellCheck={false}
               editable={!isPending}
-              accessibilityLabel={t("settings.general.openRouterKey.inputLabel")}
-              testID="settings-openrouter-key-input"
+              accessibilityLabel={t("settings.general.byok.inputLabel")}
+              testID="settings-byok-key-input"
             />
             {error ? (
-              <Text style={settingsStyles.rowError} testID="settings-openrouter-key-error">
+              <Text style={settingsStyles.rowError} testID="settings-byok-key-error">
                 {error}
               </Text>
             ) : null}
@@ -197,7 +246,7 @@ export function ArenaByokKeySection({ serverId }: { serverId: string | null }) {
             loading={isSaving}
             disabled={isPending || key.length === 0}
             onPress={handleSave}
-            testID="settings-openrouter-key-save"
+            testID="settings-byok-key-save"
           >
             {saveLabel}
           </Button>

@@ -1654,7 +1654,7 @@ describe("HostRuntimeStore", () => {
         removeItem: (name: string) => browserStorage.delete(name),
       },
     };
-    await arenaByokKey.set("sk-or-test", []);
+    await arenaByokKey.set("sk-or-test", "openrouter", []);
     const host = makeHost({
       connections: [{ id: "direct:lan:6767", type: "directTcp", endpoint: "lan:6767" }],
     });

@@ -9,10 +9,15 @@ export interface HostedArenaCredentials {
   readonly researchAccountID: string;
 }
 
-/** The user's own OpenRouter key, in a build without a control plane. */
+/** Which BYOK provider this build's key pays. Mirrors the protocol's `ArenaByokProvider`. */
+export type ByokProvider = "openrouter" | "ollama";
+
+/** The user's own provider key, in a build without a control plane. */
 export interface ByokArenaCredentials {
   readonly mode: "byok";
+  readonly provider: ByokProvider;
   readonly openRouterApiKey: string;
+  readonly ollamaApiKey: string;
 }
 
 export type ArenaCredentials = HostedArenaCredentials | ByokArenaCredentials;
@@ -108,7 +113,7 @@ export function readArenaCredentials(): ArenaCredentialsSnapshot | null {
 /**
  * What one Arena launch receives on its stdin. A hosted launch gets a revocable loopback
  * capability for the daemon's runtime proxy instead of the account session, so it needs the
- * daemon's TCP origin. A BYOK launch calls OpenRouter itself and gets the key.
+ * daemon's TCP origin. A BYOK launch calls its provider itself and gets the key.
  */
 export function issueArenaLaunchCredentials(
   daemonBaseUrl: string | null,

@@ -45,11 +45,49 @@ test("receives the account credential without installing it in the process envir
 test("receives the user's OpenRouter key without installing it in the process environment", async () => {
   const before = JSON.stringify(process.env)
   await initializeArenaCredentials(
-    chunks(JSON.stringify({ mode: "byok", openRouterApiKey: " sk-or-v1-user-key\n", controlTokenHash })),
+    chunks(
+      JSON.stringify({
+        mode: "byok",
+        provider: "openrouter",
+        openRouterApiKey: " sk-or-v1-user-key\n",
+        ollamaApiKey: "",
+        controlTokenHash,
+      }),
+    ),
   )
-  expect(arenaCredentials()).toEqual({ mode: "byok", openRouterApiKey: "sk-or-v1-user-key", controlTokenHash })
+  expect(arenaCredentials()).toEqual({
+    mode: "byok",
+    provider: "openrouter",
+    openRouterApiKey: "sk-or-v1-user-key",
+    ollamaApiKey: "",
+    controlTokenHash,
+  })
   expect(JSON.stringify(process.env) === before).toBe(true)
   expect(JSON.stringify(process.env)).not.toContain("sk-or-v1-user-key")
+})
+
+test("receives the user's Ollama Cloud key without installing it in the process environment", async () => {
+  const before = JSON.stringify(process.env)
+  await initializeArenaCredentials(
+    chunks(
+      JSON.stringify({
+        mode: "byok",
+        provider: "ollama",
+        openRouterApiKey: "",
+        ollamaApiKey: " ollama-test-key\n",
+        controlTokenHash,
+      }),
+    ),
+  )
+  expect(arenaCredentials()).toEqual({
+    mode: "byok",
+    provider: "ollama",
+    openRouterApiKey: "",
+    ollamaApiKey: "ollama-test-key",
+    controlTokenHash,
+  })
+  expect(JSON.stringify(process.env) === before).toBe(true)
+  expect(JSON.stringify(process.env)).not.toContain("ollama-test-key")
 })
 
 const hosted = {
@@ -60,7 +98,20 @@ const hosted = {
   controlPlaneUrl: "https://control.test",
   controlTokenHash,
 }
-const byok = { mode: "byok", openRouterApiKey: "sk-or-v1-secret-input", controlTokenHash }
+const byok = {
+  mode: "byok",
+  provider: "openrouter",
+  openRouterApiKey: "sk-or-v1-secret-input",
+  ollamaApiKey: "",
+  controlTokenHash,
+}
+const byokOllama = {
+  mode: "byok",
+  provider: "ollama",
+  openRouterApiKey: "",
+  ollamaApiKey: "ollama-secret-input",
+  controlTokenHash,
+}
 
 test.each([
   "",
@@ -78,7 +129,13 @@ test.each([
   JSON.stringify({ ...byok, openRouterApiKey: "sk-or-v1 secret" }),
   JSON.stringify({ ...byok, openRouterApiKey: 42 }),
   JSON.stringify({ ...byok, controlTokenHash: "0".repeat(63) }),
-  JSON.stringify({ mode: "byok", openRouterApiKey: "sk-or-v1-secret-input" }),
+  JSON.stringify({ mode: "byok", provider: "openrouter", openRouterApiKey: "sk-or-v1-secret-input", ollamaApiKey: "", controlTokenHash: "" }),
+  JSON.stringify({ mode: "byok", openRouterApiKey: "sk-or-v1-secret-input", ollamaApiKey: "", controlTokenHash }),
+  JSON.stringify({ ...byok, provider: "anthropic" }),
+  // Both keys set, or the active provider's key empty, are refused.
+  JSON.stringify({ ...byok, ollamaApiKey: "ollama-secret-input" }),
+  JSON.stringify({ ...byokOllama, openRouterApiKey: "sk-or-v1-secret-input" }),
+  JSON.stringify({ ...byokOllama, ollamaApiKey: "" }),
   JSON.stringify({ ...byok, token: "secret-input", controlPlaneUrl: "https://control.test" }),
   " ".repeat(65_537),
 ])("rejects invalid startup data without retaining a previous credential", async (text) => {
@@ -102,6 +159,7 @@ describe("Arena contestant environment", () => {
     expect(
       withoutArenaCredentials({
         OPENROUTER_API_KEY: "session-token",
+        OLLAMA_API_KEY: "ollama-secret",
         PASEO_ARENA_SESSION_TOKEN: "session-token",
         PASEO_OPENCODE_CONTROL_TOKEN: "local-control-token",
         PASEO_OPENROUTER_BASE_URL: "https://control.test/api/openrouter",

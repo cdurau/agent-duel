@@ -1,14 +1,14 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
-import type { ArenaByokStatus } from "@getpaseo/protocol/arena/rpc-schemas";
+import type { ArenaByokProvider, ArenaByokStatus } from "@getpaseo/protocol/arena/rpc-schemas";
 import { queryClient } from "@/data/query-client";
 import { getDesktopHost } from "@/desktop/host";
 import { i18n } from "@/i18n/i18next";
 
 export interface ArenaByokKeyStorage {
-  load(): Promise<string | null>;
-  save(value: string): Promise<void>;
-  clear(): Promise<void>;
+  load(provider: ArenaByokProvider): Promise<string | null>;
+  save(provider: ArenaByokProvider, value: string): Promise<void>;
+  clear(provider: ArenaByokProvider): Promise<void>;
 }
 
 export type ArenaByokClient = Pick<DaemonClient, "arenaByokStatus" | "setArenaByokKey">;
@@ -24,12 +24,16 @@ export interface ArenaByokHostStatus {
 }
 
 export interface ArenaByokKey {
-  /** Stores the key, or removes it with `null`, then hands the change to every host that takes one. */
-  set(key: string | null, hosts: readonly ArenaByokHost[]): Promise<ArenaByokHostStatus[]>;
-  /** Hands a host that just connected the stored key; the key it already holds changes nothing. */
-  deliver(client: ArenaByokClient): Promise<ArenaByokStatus>;
+  /** Stores the key for `provider`, or removes it with `null`, then hands the change to every host that takes one. */
+  set(
+    key: string | null,
+    provider: ArenaByokProvider,
+    hosts: readonly ArenaByokHost[],
+  ): Promise<ArenaByokHostStatus[]>;
+  /** Hands a host that just connected the stored key for `provider`; the key it already holds changes nothing. */
+  deliver(client: ArenaByokClient, provider: ArenaByokProvider): Promise<ArenaByokStatus>;
   /** Resolves once the host has a key to run a battle on, and throws when there is none. */
-  ensure(client: ArenaByokClient): Promise<void>;
+  ensure(client: ArenaByokClient, provider: ArenaByokProvider): Promise<void>;
 }
 
 export class ArenaByokKeyMissingError extends Error {
@@ -39,61 +43,72 @@ export class ArenaByokKeyMissingError extends Error {
   }
 }
 
-export function createArenaByokKey(storage: ArenaByokKeyStorage): ArenaByokKey {
-  // Read once and then kept current by set(), so a delivery that started reading before a new key
-  // was saved still sends the new one.
-  let held: { key: string | null } | null = null;
+interface HeldKey {
+  readonly provider: ArenaByokProvider;
+  readonly key: string | null;
+}
 
-  async function read(): Promise<string | null> {
-    if (held) return held.key;
-    const stored = await storage.load();
-    held ??= { key: stored };
+export function createArenaByokKey(storage: ArenaByokKeyStorage): ArenaByokKey {
+  // Read once per provider and then kept current by set(), so a delivery that started reading
+  // before a new key was saved still sends the new one.
+  let held: HeldKey | null = null;
+
+  async function read(provider: ArenaByokProvider): Promise<string | null> {
+    if (held && held.provider === provider) return held.key;
+    const stored = await storage.load(provider);
+    held ??= { provider, key: stored };
     return held.key;
   }
 
-  async function handOver(client: ArenaByokClient, key: string | null): Promise<ArenaByokStatus> {
-    const result = await client.setArenaByokKey(key);
-    return { available: true, configured: result.configured };
+  async function handOver(
+    client: ArenaByokClient,
+    key: string | null,
+    provider: ArenaByokProvider,
+  ): Promise<ArenaByokStatus> {
+    const result = await client.setArenaByokKey(key, provider);
+    return { available: true, configured: result.configured, provider };
   }
 
   return {
-    async set(key, hosts) {
-      if (key === null) await storage.clear();
-      else await storage.save(key);
-      held = { key };
+    async set(key, provider, hosts) {
+      if (key === null) await storage.clear(provider);
+      else await storage.save(provider, key);
+      held = { provider, key };
       return Promise.all(
         hosts.map(async ({ serverId, client }) => {
           const status = await client.arenaByokStatus();
           if (!status.available) return { serverId, status };
-          return { serverId, status: await handOver(client, key) };
+          return { serverId, status: await handOver(client, key, provider) };
         }),
       );
     },
-    async deliver(client) {
+    async deliver(client, provider) {
       // Announced before the stored key is read: the chats this connection reopens start Arena,
       // and a daemon without a key holds those starts until the key arrives or we say there is none.
       const status = await client.arenaByokStatus({ keyHandover: "pending" });
       if (!status.available) return status;
-      const key = await read().catch(async (error: unknown) => {
+      const key = await read(provider).catch(async (error: unknown) => {
         await client.arenaByokStatus({ keyHandover: "none" });
         throw error;
       });
       if (key === null) return client.arenaByokStatus({ keyHandover: "none" });
-      return handOver(client, key);
+      return handOver(client, key, provider);
     },
-    async ensure(client) {
+    async ensure(client, provider) {
       const status = await client.arenaByokStatus();
       // A host holding another client's key keeps it: replacing it restarts Arena under every
       // running battle.
-      if (!status.available || status.configured) return;
-      const key = await read();
+      if (!status.available || (status.configured && status.provider === provider)) return;
+      const key = await read(provider);
       if (key === null) throw new ArenaByokKeyMissingError();
-      await handOver(client, key);
+      await handOver(client, key, provider);
     },
   };
 }
 
-const BROWSER_STORAGE_KEY = "agent-duel-openrouter-key";
+function storageKey(provider: ArenaByokProvider): string {
+  return provider === "ollama" ? "agent-duel-ollama-key" : "agent-duel-openrouter-key";
+}
 
 /**
  * Electron encrypts the key in the main process and never leaves a copy in renderer storage. The
@@ -103,20 +118,24 @@ function resolveKeyStorage(): ArenaByokKeyStorage {
   const desktop = getDesktopHost();
   if (!desktop) {
     return {
-      load: () => AsyncStorage.getItem(BROWSER_STORAGE_KEY),
-      save: (value) => AsyncStorage.setItem(BROWSER_STORAGE_KEY, value),
-      clear: () => AsyncStorage.removeItem(BROWSER_STORAGE_KEY),
+      load: (provider) => AsyncStorage.getItem(storageKey(provider)),
+      save: (provider, value) => AsyncStorage.setItem(storageKey(provider), value),
+      clear: (provider) => AsyncStorage.removeItem(storageKey(provider)),
     };
   }
   const bridge = desktop.byok?.key;
-  if (!bridge) throw new Error("Encrypted OpenRouter key storage is unavailable");
-  return bridge;
+  if (!bridge) throw new Error("Encrypted BYOK key storage is unavailable");
+  return {
+    load: (provider) => bridge.load(provider),
+    save: (provider, value) => bridge.save(provider, value),
+    clear: (provider) => bridge.clear(provider),
+  };
 }
 
 export const platformArenaByokKeyStorage: ArenaByokKeyStorage = {
-  load: async () => resolveKeyStorage().load(),
-  save: async (value) => resolveKeyStorage().save(value),
-  clear: async () => resolveKeyStorage().clear(),
+  load: async (provider) => resolveKeyStorage().load(provider),
+  save: async (provider, value) => resolveKeyStorage().save(provider, value),
+  clear: async (provider) => resolveKeyStorage().clear(provider),
 };
 
 export const arenaByokKey = createArenaByokKey(platformArenaByokKeyStorage);
@@ -126,11 +145,14 @@ export function arenaByokStatusQueryKey(serverId: string | null) {
 }
 
 /** A daemon forgets the key when it exits, so every connection hands it over again. */
-export function deliverArenaByokKeyOnConnect({ serverId, client }: ArenaByokHost): void {
-  void arenaByokKey.deliver(client).then(
+export function deliverArenaByokKeyOnConnect(
+  { serverId, client }: ArenaByokHost,
+  provider: ArenaByokProvider = "openrouter",
+): void {
+  void arenaByokKey.deliver(client, provider).then(
     (status) => queryClient.setQueryData(arenaByokStatusQueryKey(serverId), status),
     (error: unknown) =>
-      console.warn("[ArenaByok] could not hand the OpenRouter key to the daemon", {
+      console.warn(`[ArenaByok] could not hand the ${provider} key to the daemon`, {
         serverId,
         error: error instanceof Error ? error.message : String(error),
       }),

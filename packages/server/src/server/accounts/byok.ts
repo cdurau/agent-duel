@@ -6,6 +6,8 @@ import {
   expectNoArenaCredentials,
   installArenaCredentials,
   readArenaCredentials,
+  type ArenaCredentials,
+  type ByokProvider,
 } from "./credentials.js";
 
 /**
@@ -15,12 +17,14 @@ import {
 const ARENA_BYOK_KEY_HANDOVER_TIMEOUT_MS = 10_000;
 
 /**
- * Holds the user's OpenRouter key for a daemon without a control plane. The renderer stores the
+ * Holds the user's BYOK provider key for a daemon without a control plane. The renderer stores the
  * key and hands it over after connecting; the daemon keeps it only in memory and passes it to
  * Arena through the child's stdin, never an environment variable or file.
  */
 export interface ArenaByokService {
   isConfigured(): boolean;
+  /** Which provider the held key pays. */
+  provider(): ByokProvider | null;
   /**
    * `client` just connected and hands over its stored key next if it has one. Until it does, or
    * says it has none, Arena starts wait for that key, so the chats the client reopens on
@@ -30,7 +34,7 @@ export interface ArenaByokService {
   /** `client` has no key to hand over, so Arena starts stop waiting for one from it. */
   expectNoKey(client: object): void;
   /** Installs, replaces, or with `null` clears the key, restarting Arena when it changes. */
-  setKey(key: string | null): Promise<void>;
+  setKey(key: string | null, provider: ByokProvider): Promise<void>;
 }
 
 export interface CreateArenaByokServiceOptions {
@@ -39,9 +43,17 @@ export interface CreateArenaByokServiceOptions {
   readonly keyHandoverTimeoutMs?: number;
 }
 
-function heldKey(): string | null {
+function heldCredentials(): Extract<ArenaCredentials, { mode: "byok" }> | null {
   const credentials = readArenaCredentials()?.credentials;
-  return credentials?.mode === "byok" ? credentials.openRouterApiKey : null;
+  return credentials?.mode === "byok" ? credentials : null;
+}
+
+function heldKey(): string | null {
+  const credentials = heldCredentials();
+  if (!credentials) return null;
+  return credentials.provider === "ollama"
+    ? credentials.ollamaApiKey
+    : credentials.openRouterApiKey;
 }
 
 export function createArenaByokService(
@@ -53,19 +65,30 @@ export function createArenaByokService(
 
   return {
     isConfigured: () => heldKey() !== null,
+    provider: () => heldCredentials()?.provider ?? null,
     expectKey(client) {
       if (heldKey() === null) expectArenaCredentials(client, keyHandoverTimeoutMs);
     },
     expectNoKey(client) {
       expectNoArenaCredentials(client);
     },
-    setKey(key) {
+    setKey(key, provider) {
       async function apply(): Promise<void> {
         // A reconnecting client hands over the key it already gave; that must not interrupt battles.
-        const previous = heldKey();
-        if (key === previous) return;
+        const previous = heldCredentials();
+        let previousKey: string | null = null;
+        if (previous)
+          previousKey =
+            previous.provider === "ollama" ? previous.ollamaApiKey : previous.openRouterApiKey;
+        if (key === previousKey && previous?.provider === provider) return;
         if (key === null) clearArenaCredentials();
-        else installArenaCredentials({ mode: "byok", openRouterApiKey: key });
+        else
+          installArenaCredentials({
+            mode: "byok",
+            provider,
+            openRouterApiKey: provider === "openrouter" ? key : "",
+            ollamaApiKey: provider === "ollama" ? key : "",
+          });
         // Arena cannot start without a key, so the first one has nothing to restart. Restarting
         // anyway would stop the start that a chat reopened on connecting is waiting on.
         if (previous !== null) await restartArena();

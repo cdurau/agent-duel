@@ -1838,6 +1838,33 @@ export const ja: TranslationResources = {
     },
     general: {
       title: "一般",
+      byok: {
+        title: "Model provider key",
+        providerLabel: "Provider",
+        openrouter: "OpenRouter",
+        ollama: "Ollama Cloud",
+        configured: "Key added",
+        notConfigured: "No key added",
+        description: "Battles and chats use this key. It stays on this computer.",
+        openRouterDescription:
+          "Battles and chats use this OpenRouter key. It stays on this computer.",
+        ollamaDescription:
+          "Battles and chats use this Ollama Cloud key. It stays on this computer.",
+        inputLabel: "API key",
+        openRouterPlaceholder: "sk-or-v1-...",
+        ollamaPlaceholder: "ollama-...",
+        save: "Save",
+        saving: "Saving...",
+        remove: "Remove",
+        removing: "Removing...",
+        replaceTitle: "Replace the key?",
+        replaceMessage: "Running battles will stop.",
+        replace: "Replace",
+        removeTitle: "Remove the key?",
+        removeMessage: "Running battles will stop, and new ones can't start until you add a key.",
+        saveFailed: "Couldn't save the key. Try again.",
+        removeFailed: "Couldn't remove the key. Try again.",
+      },
       openRouterKey: {
         title: "OpenRouter キー",
         configured: "キーを追加済み",

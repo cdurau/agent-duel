@@ -627,13 +627,17 @@ export const ArenaSingleAgentVoteResponseSchema = z.object({
   type: z.literal("arena.single_agent.vote.response"),
   payload: ArenaSnapshotResponsePayloadSchema,
 });
+/** The BYOK inference providers a local build can run on; exactly one is active per daemon. */
+export const ArenaByokProviderSchema = z.enum(["openrouter", "ollama"]);
+export type ArenaByokProvider = z.infer<typeof ArenaByokProviderSchema>;
 /**
- * `available`: this daemon runs Arena on the user's own OpenRouter key instead of an account.
- * `configured`: it holds that key in memory.
+ * `available`: this daemon runs Arena on the user's own key instead of an account.
+ * `configured`: it holds that key in memory. `provider`: which provider the held key pays.
  */
 export const ArenaByokStatusSchema = z.object({
   available: z.boolean(),
   configured: z.boolean(),
+  provider: ArenaByokProviderSchema.optional(),
 });
 export type ArenaByokStatus = z.infer<typeof ArenaByokStatusSchema>;
 /**
@@ -657,11 +661,12 @@ export const ArenaByokStatusGetResponseSchema = z.object({
 });
 export const ArenaByokKeySetResultSchema = z.object({ configured: z.boolean() });
 export type ArenaByokKeySetResult = z.infer<typeof ArenaByokKeySetResultSchema>;
-/** `null` clears the key. */
+/** `null` clears the key. `provider` says which provider a non-null key pays. */
 export const ArenaByokKeySetRequestSchema = z.object({
   type: z.literal("arena.byok.key.set.request"),
   requestId: z.string(),
   key: z.string().nullable(),
+  provider: ArenaByokProviderSchema,
 });
 export const ArenaByokKeySetResponseSchema = z.object({
   type: z.literal("arena.byok.key.set.response"),

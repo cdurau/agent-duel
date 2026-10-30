@@ -11,11 +11,16 @@ export type Caller = {
 
 export type Fetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>
 
+export type ByokProvider = "openrouter" | "ollama"
+
 export type ArenaContext = {
   readonly resolveCaller: (request: Request) => Promise<Caller | undefined>
   readonly db: () => Promise<ArenaDb>
   readonly pool: ModelPool
+  /** Exactly one BYOK provider is active; the other key stays undefined. */
+  readonly provider: ByokProvider
   readonly openRouterApiKey: string | undefined
+  readonly ollamaApiKey: string | undefined
   readonly fetch: Fetch
   readonly random: () => number
   readonly uuid: () => string

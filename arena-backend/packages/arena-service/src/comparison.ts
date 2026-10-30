@@ -29,7 +29,7 @@ export async function handleComparisonRequest(request: Request, context: ArenaCo
   if (request.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 })
   const caller = await authorize(request, context, (message, status) => Response.json({ error: message }, { status }))
   if (caller instanceof Response) return caller
-  const apiKey = context.openRouterApiKey
+  const apiKey = context.provider === "ollama" ? context.ollamaApiKey : context.openRouterApiKey
   if (!apiKey) return Response.json({ error: "Arena comparison is unavailable" }, { status: 503 })
 
   let parsed: unknown
@@ -54,10 +54,9 @@ export async function handleComparisonRequest(request: Request, context: ArenaCo
   try {
     const response = await requestUtilityModel(context, {
       headers: {
-        Authorization: `Bearer ${apiKey}`,
         Accept: request.headers.get("accept") || "application/json",
         "Content-Type": "application/json",
-        "X-OpenRouter-Metadata": "enabled",
+        ...(context.provider === "openrouter" ? { "X-OpenRouter-Metadata": "enabled" } : {}),
       },
       body: { messages: [input.message], temperature: 0 },
       signal: request.signal,

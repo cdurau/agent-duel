@@ -1,10 +1,62 @@
 # Ollama Cloud BYOK mit automatischem Modellkatalog
 
-Status: Umsetzungsplan, nicht implementiert. Es wurden keine Live-Modellaufrufe durchgeführt.
+Status: Umsetzung begonnen, noch nicht abgenommen. Stand und Nachweise: [Umsetzungsstand](#umsetzungsstand-2026-10-30).
 
 Repository: `/Users/cedi/Clouds/Projekte/KI/agent-duel`
 
 Die [Agenten-Anleitung](ollama-cloud-byok-agent-guide.md) beschreibt Arbeitsregeln und Einstiegspunkte. Dieser Plan besitzt Anforderungen, Reihenfolge und Abnahmekriterien.
+
+## Umsetzungsstand 2026-10-30
+
+Die Umsetzung ist unvollständig. Der Ollama-Pfad ist noch nicht für einen vollständigen produktiven BYOK-Betrieb freigegeben. Nutze diesen Abschnitt als Übergabe; aktualisiere ihn nach weiteren verifizierten Etappen.
+
+### Etappe 1: verifizierte Cloud-Kompatibilität
+
+Die Cloud-Abfragen und begrenzten Live-Inferenztests wurden mit dem vom Nutzer bereitgestellten Key ausgeführt. Das Secret selbst wurde nicht in Ausgaben oder Repository-Dateien geschrieben.
+
+- `GET https://ollama.com/api/tags` antwortete mit HTTP 200 und 23 Modellen. Der Katalog nennt `capabilities`; 12 Einträge hatten sowohl `vision` als auch `tools`. Die Abfrage ohne Authentifizierung antwortete ebenfalls mit HTTP 200.
+- `POST https://ollama.com/api/show` mit Bearer-Key funktionierte direkt gegen die Cloud. Für `kimi-k2.6` kamen unter anderem `kimi-k2.context_length = 262144` und `thinking.values = [false, true]`; für `mistral-large-4` `mistral4.context_length = 1048576`; für `glm-5.3-flash` `glm5_next.context_length = 1048576` sowie `thinking.values = [low, high, max]` zurück.
+- `GET https://ollama.com/v1/models` antwortete mit HTTP 200 und echten Modell-IDs. Der Endpoint lieferte keine Fähigkeiten; dafür ist `/api/tags` die verwendete Quelle.
+- Mit `glm-5.3-flash` gelangen Chat Completions, ein vollständiger Tool-Zyklus (Tool-Aufruf, Tool-Ergebnis, abschließende Antwort), gestreamte Tool-Aufruf-Deltas und ein Vision-Aufruf mit Base64-Bild jeweils mit HTTP 200. `stream_options.include_usage` lieferte Nutzungsdaten.
+- Ollamas OpenAI-kompatible Dokumentation markiert `tool_choice` als nicht unterstützt. Der neue Adapter entfernt dieses Feld, statt es ungeprüft weiterzuleiten. Modelle/Prompts, die erzwungene Toolwahl voraussetzen, sind noch nicht abgenommen.
+- `reasoning_effort`-Werte wurden von der getesteten GLM-Instanz auch bei einem ungültigen Wert mit HTTP 200 angenommen. Daraus folgt kein Nachweis, dass die gewünschte Stufe angewendet wurde. Thinking-Steuerung und Metadaten müssen im Adapter konservativ behandelt und modellbezogen geprüft werden.
+
+Die begrenzten Live-Aufrufe belegen die API-Kompatibilität der getesteten Pfade, nicht den kompletten Battle-/Desktop-Durchlauf, Bildqualität, parallele Belastbarkeit, Limits oder Hosted-Verhalten.
+
+### Implementiert, aber noch nicht vollständig abgenommen
+
+- BYOK-Startup-Credentials tragen jetzt Provider plus getrennte OpenRouter-/Ollama-Keyfelder; die Engine reicht den Key weiter über die bestehende Startup-Pipe, nicht über Contestant-Umgebungen.
+- Protokoll, Client, Daemon-Hand-over, Desktop-IPC und Renderer-Keyablage wurden auf `openrouter`/`ollama` erweitert. Neue verschlüsselte Key-Slots und eine Legacy-OpenRouter-Migration sind begonnen.
+- `arena-service` hat einen Ollama-Chat-Completions-Adapter, einen kleinen statischen Pool aus drei vision-/tool-fähigen Kandidaten, ein Utility-Modell sowie eine gemeinsame Response-Sanitizer-Datei. Der bestehende OpenRouter-Aufrufpfad bleibt erhalten.
+- Die Settings zeigen eine Providerwahl und getrennte Schlüssel-Platzhalter. Die Katalog-Discovery, Rollen-/Pool-Konfiguration und Prüfung aus dem Plan fehlen noch; die Auswahl nutzt derzeit einen fest eingebauten Pool.
+
+Gezielte Prüfungen am Übergabestand:
+
+| Prüfung                                                                                                                                          | Ergebnis                                        |
+| ------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------- |
+| `npm run typecheck`                                                                                                                              | Grün                                            |
+| `npm run lint`                                                                                                                                   | Grün, 0 Warnungen / 0 Fehler                    |
+| `bun run typecheck` in `arena-backend/packages/arena-service`                                                                                    | Grün                                            |
+| `bun run typecheck` in `arena-backend/packages/opencode`                                                                                         | Grün                                            |
+| `bun test test/arena/credentials.test.ts --bail=1` im opencode-Paket                                                                             | 27 bestanden                                    |
+| `bun test ./src/ollama.test.ts --bail=1` im arena-service-Paket, mit lokaler MongoDB                                                             | 6 bestanden                                     |
+| `npm run test --workspace @getpaseo/app -- src/byok/key.test.ts`                                                                                 | 16 bestanden                                    |
+| Gezielte OpenRouter-Regressionstests (Pool, Assignments, Comparison, Metadata, Proxy, Stream-Recovery, Reasoning, Budget, Calibration, Netzwerk) | bestanden; siehe Session-Ausgabe vom 2026-10-30 |
+
+Ein erster Lauf des Service-Tests ohne `OPENCODE_ARENA_MONGODB_URI` schlug erwartungsgemäß wegen fehlender Testdatenbank fehl; mit lokaler MongoDB waren alle 12 Tests in `service.test.ts` grün. Ein vollständiger Battle im Electron-Stack wurde nicht durchgeführt. Die Änderungen wurden formatiert, sind aber nicht als Release verifiziert. Ein Commit ändert diesen Abnahmestatus nicht.
+
+### Nächste Schritte für die Folgesession
+
+1. `git status --short` prüfen und den eingecheckten Stand mit diesem Abschnitt abgleichen.
+2. Zuerst Adapter-/Assignment-Lücken beheben und Tests ergänzen: OpenRouter-Responses-Pfade explizit ausschließen/unterstützen, Replay-/Streamverhalten, tatsächliche Reasoning-Weitergabe, Tool- und Bildverhalten; insbesondere keinen Retry oder Anbieter-Fallback hinzufügen.
+3. Credential-/RPC-Schema, Storage-Migration und Host-Zustellung vollständig testen. Die aktuelle Renderer-Übertragung bei Verbindungen und die Providerwahl dürfen Keys nicht an ungewählte Remote-Hosts verteilen. Migration erst nach atomarem Zielschreiben bereinigen.
+4. Discovery vertikal implementieren: validierter Katalog, `/api/show`-Metadaten mit begrenzter Parallelität, Snapshot/Refresh, Generation-Races und Fehlererhalt. Statische Poolwerte nicht als automatische Modellerkennung ausgeben.
+5. Rollen-/Konfigurationsvertrag und private Assignments ergänzen; `medium` und Hilfsaufrufe über Ollama laufen lassen. Model identities/Secrets dürfen nicht vor der Abstimmung leaken.
+6. Einstellungen auf Konfigurationsmodell, Katalogzustände, Eignung und explizite kostenpflichtige Modellprüfung umstellen.
+7. Mit erneuter ausdrücklicher Freigabe den vollständigen Electron-Stack testen: zwei parallele Contestants, Tools, Vision, Vote/Übernahme/Folgefrage, Neustart und Beleg „kein OpenRouter-Verkehr“. Hosted-Pfad unverändert halten.
+8. Format, Lint, Typecheck und nur betroffene Tests erneut ausführen; danach die Tabelle und offenen Punkte aktualisieren.
+
+Der Test-Key ist eine Laufzeitvoraussetzung, kein Repository-Artefakt. Nicht in Befehlsargumente, Logs, Fixtures oder Dokumentation kopieren.
 
 ## 1. Ziel
 

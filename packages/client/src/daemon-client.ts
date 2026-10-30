@@ -9,6 +9,7 @@ import type {
   ArenaReviewAnswer,
   ArenaByokKeyHandover,
   ArenaByokKeySetResult,
+  ArenaByokProvider,
   ArenaByokStatus,
   ArenaComparisonDiff,
   ArenaComparisonFileDiff,
@@ -2063,14 +2064,21 @@ export class DaemonClient {
           ...(options.keyHandover ? { keyHandover: options.keyHandover } : {}),
         },
       });
-    return { available: payload.available, configured: payload.configured };
+    return {
+      available: payload.available,
+      configured: payload.configured,
+      ...(payload.provider ? { provider: payload.provider } : {}),
+    };
   }
 
-  /** Hands the daemon the user's OpenRouter key, or clears it with `null`; Arena restarts on a change. */
-  async setArenaByokKey(key: string | null): Promise<ArenaByokKeySetResult> {
+  /** Hands the daemon the user's key for `provider`, or clears it with `null`; Arena restarts on a change. */
+  async setArenaByokKey(
+    key: string | null,
+    provider: ArenaByokProvider = "openrouter",
+  ): Promise<ArenaByokKeySetResult> {
     const payload =
       await this.sendNamespacedCorrelatedSessionRequest<"arena.byok.key.set.response">({
-        message: { type: "arena.byok.key.set.request", key },
+        message: { type: "arena.byok.key.set.request", key, provider },
       });
     return { configured: payload.configured };
   }
