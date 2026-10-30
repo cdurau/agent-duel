@@ -47,6 +47,7 @@ product targets. Report shared upstream defects separately.
 | Verification tools          | [Daemon tests](ad-hoc-daemon-testing.md), [browser capture harness](browser-capture-harness.md)                                                                                                                |
 | Native and localization     | [Mobile panels](mobile-panels.md), [i18n](i18n.md), [Maestro flows](../packages/app/maestro/README.md)                                                                                                         |
 | Historical plans            | [Session decomposition](refactors/session-decomposition-plan.md)                                                                                                                                               |
+| BYOK planning               | [Ollama Cloud plan](refactors/ollama-cloud-byok-plan.md), [agent guide](refactors/ollama-cloud-byok-agent-guide.md)                                                                                            |
 
 ## Other documentation collections
 
